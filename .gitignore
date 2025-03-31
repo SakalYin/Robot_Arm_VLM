@@ -1,0 +1,9 @@
+old/
+Qwen2b-Robot-Arm-Unsloth/
+Qwen2b-Robot-Arm-Unsloth-mixed-cases(6)/
+Robot_Arm_Data/
+tmp/
+unsloth_compiled_cache/
+wandb/
+model/__pycache__/
+model/unsloth_compiled_cache/
