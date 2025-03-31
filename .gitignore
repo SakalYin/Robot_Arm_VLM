@@ -7,3 +7,4 @@ unsloth_compiled_cache/
 wandb/
 model/__pycache__/
 model/unsloth_compiled_cache/
+LLM_evaluation_demo.ipynb
