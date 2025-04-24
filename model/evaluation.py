@@ -2,16 +2,14 @@ import numpy as np
 from sklearn.metrics import classification_report
 from scipy.spatial.transform import Rotation as R
 import sys
-from model.utils import batch_inference, extract_position_and_orientation
+from model.qwenvl.utils import batch_inference, extract_position_and_orientation
+import pandas as pd
+import re
 
-def euclidean_distance(predicted, truth, summarize='mean'):
+def euclidean_distance(predicted, truth):
     distances = [abs(((float(p1[0]) - float(p2[0]))**2 + (float(p1[1]) - float(p2[1]))**2 + (float(p1[2]) - float(p2[2]))**2) ** 0.5)
                     for p1,p2 in zip(predicted, truth)]
-    
-    if summarize == 'mean':
-        distances = np.mean(distances)
-    
-    return distances
+    return np.mean(distances)
 
 def mae(predicted, truth):
     ae = [abs(float(p1) - float(p2)) for p1,p2 in zip(predicted, truth)]
@@ -162,7 +160,7 @@ def progress_bar(progress, bar_size=50):
     bar = f'|{progress}{space}|'
     return bar
     
-def dataset_inference(model, tokenizer, eval_dataset, system_message=None, batch_size=3, prompt_field='prompt', image_field='images', format=2, return_raw=False):
+def dataset_inference(model, tokenizer, eval_dataset, system_message=None, batch_size=3, prompt_field='prompt', image_field='images', format=2, return_raw=False, temperature=1.5, min_p=0.1):
     results = [[],[],[]]
     raws = []
     eval_dataset.reset_index(inplace=True, drop=True)
@@ -178,9 +176,9 @@ def dataset_inference(model, tokenizer, eval_dataset, system_message=None, batch
             image = eval_dataset[image_field][index:index+batch_size]
         
         if return_raw:
-            pos, ori, obj, raw = batch_inference(model=model, tokenizer=tokenizer, system_message=system_message, prompts=prompt, image_paths=image, format=format, return_raw=return_raw)
+            pos, ori, obj, raw = batch_inference(model=model, tokenizer=tokenizer, system_message=system_message, prompts=prompt, image_paths=image, format=format, return_raw=return_raw, temperature=temperature, min_p=min_p)
         else:
-            pos, ori, obj = batch_inference(model=model, tokenizer=tokenizer, prompts=prompt, image_paths=image, format=format, return_raw=return_raw)
+            pos, ori, obj = batch_inference(model=model, tokenizer=tokenizer, prompts=prompt, image_paths=image, format=format, return_raw=return_raw, temperature=temperature, min_p=min_p)
         results[0].extend(pos)
         results[1].extend(ori)
         results[2].extend(obj)
@@ -190,24 +188,63 @@ def dataset_inference(model, tokenizer, eval_dataset, system_message=None, batch
         
         prog = min(((index + batch_size)*100 / len(eval_dataset)), 100)
         sys.stdout.write(f"\rProgress: {prog:.2f}%        {progress_bar(prog)}")
-        sys.stdout.flush() 
-        
+        sys.stdout.flush()
+
+    eval_dataset = eval_dataset.copy()    
+    eval_dataset['pos_out'] = results[0]
+    eval_dataset['ori_out'] = results[1]
+    eval_dataset['obj_out'] = results[2]
     if return_raw:
-        return results, raws
-    return results
+        eval_dataset['raw_out'] = raws
 
-def get_error(lst, x=None):
-    return [i for i, value in enumerate(lst) if value == x]
+    return eval_dataset
 
-def remove_error(lst, index):
-    return [lst[i] for i in range(len(lst)) if i not in index]
+def validate_output_format(df, column_name):
+    def check_parameter_counts(text):
+        # Count occurrences of each tag
+        obj_tags = re.findall(r"<obj>.*?</obj>", text)
+        pose_tags = re.findall(r"<pose>.*?</pose>", text)
+        orient_tags = re.findall(r"<orient>.*?</orient>", text)
 
-def eval_model(model, tokenizer, eval_dataset, system_message=None, batch_size=3, prompt_field='prompt', image_field='images', output_field='output', format=2, return_raw=False):
-    if return_raw:
-        results, raw = dataset_inference(model=model, tokenizer=tokenizer, eval_dataset=eval_dataset, batch_size=batch_size, prompt_field=prompt_field, image_field=image_field, format=format, return_raw=return_raw)
-    else:
-        results = dataset_inference(model=model, tokenizer=tokenizer, eval_dataset=eval_dataset, system_message=system_message, batch_size=batch_size, prompt_field=prompt_field, image_field=image_field, format=format, return_raw=return_raw)
-        
+        errors = []
+        if len(obj_tags) != 1:
+            errors.append(f"obj count = {len(obj_tags)}")
+        if len(pose_tags) != 1:
+            errors.append(f"pose count = {len(pose_tags)}")
+        if len(orient_tags) != 1:
+            errors.append(f"orient count = {len(orient_tags)}")
+
+        return [] if not errors else errors
+    
+    def check_parameter_format(df, error_col):
+        for i in range(len(df)):
+            if isinstance(df['pos_out'][i], list):
+                if len(df['pos_out'][i]) != 3:
+                    df[error_col][i].append('incorrect position format')
+            else:
+                df[error_col][i].append('position is not listformat')
+
+            if isinstance(df['ori_out'][i], list): 
+                if len(df['ori_out'][i]) != 4:
+                    df[error_col][i].append('incorrect orientation format')
+            else:
+                df[error_col][i].append('orientation is not list format')
+    
+    error_col = 'format_check'
+    df[error_col] = df[column_name].apply(check_parameter_counts)
+    check_parameter_format(df, error_col=error_col)
+
+    return df
+
+def get_error(df):
+    df = df.copy()
+    df = validate_output_format(df, 'raw_out')
+    idx = df[df["format_check"].apply(len) > 0].index
+    return df, idx
+
+def eval_model(model, tokenizer, eval_dataset, system_message=None, batch_size=3, prompt_field='prompt', image_field='images', output_field='output', format=2, temperature=1.5, min_p=0.1):
+    results = dataset_inference(model=model, tokenizer=tokenizer, eval_dataset=eval_dataset, system_message=system_message, batch_size=batch_size, prompt_field=prompt_field, image_field=image_field, format=format, return_raw=True, temperature=temperature, min_p=min_p)
+  
     pos_truth = []
     ori_truth = []
     obj_truth = []
@@ -217,15 +254,17 @@ def eval_model(model, tokenizer, eval_dataset, system_message=None, batch_size=3
         pos_truth.append(pos)
         ori_truth.append(ori)
         obj_truth.append(obj)
+
+    results['pos_truth'] = pos_truth
+    results['ori_truth'] = ori_truth
+    results['obj_truth'] = obj_truth
     
-    index = get_error(lst=results[0])
-    results[0], results[1], results[2] = remove_error(results[0], index), remove_error(results[1], index), remove_error(results[2], index)
-    pos_truth, ori_truth, obj_truth = remove_error(pos_truth, index), remove_error(ori_truth, index), remove_error(obj_truth, index)
+    results, index = get_error(results)
+    eval_results = results.drop(index)
+    print(f'[INFO] {len(index)} records are excluded from the evaluation due to inconsistent output format')
+
+    position_evaluation_overview(predicted=eval_results['pos_out'], truth=eval_results['pos_truth'])
+    orientation_evaluation_overview(predicted=eval_results['ori_out'], truth=eval_results['ori_truth'])
+    class_evaluation(predicted=eval_results['obj_out'], truth=eval_results['obj_truth'])
     
-    position_evaluation_overview(predicted=results[0], truth=pos_truth)
-    orientation_evaluation_overview(predicted=results[1], truth=ori_truth)
-    class_evaluation(predicted=results[2], truth=obj_truth)
-    
-    if return_raw:
-        return results, [pos_truth, ori_truth, obj_truth], raw, index
-    return results, [pos_truth, ori_truth, obj_truth]
+    return results, index

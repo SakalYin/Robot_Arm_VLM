@@ -79,7 +79,7 @@ def prepare_data(data_folder, camera_loc, drop_static=True, reset_frac=0.1, floa
             data.loc[i, 'prompt'] = random.choice(plastic_cup_prompts)
         if 'strawberry' in data.loc[i, 'object']:
             data.loc[i, 'prompt'] = random.choice(strawberry_prompts)
-    data['prompt'] = data['prompt'].apply(lambda x: x + f'<camera>{camera_loc}</camera>')
+    # data['prompt'] = data['prompt'].apply(lambda x: x + f'<camera>{camera_loc}</camera>')
 
     # Round the floats
     pos = data.pose[i].split(',')

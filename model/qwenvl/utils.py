@@ -3,8 +3,10 @@ import re
 import json
 from unsloth import FastVisionModel
 from transformers import TextStreamer
+import pandas as pd
 
 def resize_image(image_input):
+    """Load image from path or matrices and resize them"""
     if isinstance(image_input, str):  
         image = Image.open(image_input)
     else:  
@@ -14,7 +16,7 @@ def resize_image(image_input):
     return image
 
 def extract_position_and_orientation(text, format=2):
-    """Extracts position and orientation data from JSON-like text output."""
+    """Extracts object class, position and orientation data from JSON-like text output."""
     if format == 1:
         match = re.search(r'\[.*\]', text)
         if match:
@@ -142,3 +144,32 @@ def batch_inference(image_paths, prompts, model, tokenizer, system_message=None,
         return position, orientation, object, outputs
     
     return position, orientation, object
+
+def verify_ouput(outputs):
+    """Verify format error for a list of outputs"""
+    results = []
+
+    for i, output in enumerate(outputs):
+        errors = []
+
+        obj_match = re.findall(r"<obj>(.*?)</obj>", output)
+        pose_match = re.findall(r"<pose>(.*?)</pose>", output)
+        orient_match = re.findall(r"<orient>(.*?)</orient>", output)
+
+        if (len(obj_match) > 1) or (len(pose_match) > 1) or (len(orient_match) > 1):
+            errors.append("Repetitions")
+            continue
+        elif (len(obj_match) == 0) or (len(pose_match) == 0) or (len(orient_match) == 0):
+            errors.append("Missing Parameters")
+            continue
+        else:
+            position = pose_match[0].split(',')
+            orientation = orient_match[0].split(',')
+            
+            if len(position) != 3:
+                errors.append("Position format")
+            if len(orientation) != 4:
+                errors.append("Orientation format")
+        results.append([i, output, errors])
+
+    return pd.DataFrame(results, columns=['index', 'raw', 'errors'])
