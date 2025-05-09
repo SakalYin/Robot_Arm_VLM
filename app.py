@@ -9,7 +9,6 @@ import json
 
 app = Flask(__name__)
 
-# model, processor = load_model('D:/Sakal/AI_FARM/Qwen2vl_Robot_Arm/Qwen2b-Robot-Arm-Unsloth/checkpoint-76')
 model, processor = FastVisionModel.from_pretrained(
     r'Qwen2b-Robot-Arm-Unsloth\7B\V2\P3\checkpoint-440',
     load_in_4bit=True,  

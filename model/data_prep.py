@@ -39,7 +39,7 @@ def remove_static_eff(data):
 
     return index
 
-def prepare_data(data_folder, camera_loc, drop_static=True, reset_frac=0.1, float_round=5):
+def prepare_data(data_folder, camera_loc=None, drop_static=True, reset_frac=0.1, float_round=5):
 
     # load and combine data + eff data
     data = read_data(data_folder+'/label.txt', ['path', 'object', 'pose', 'orient'])
@@ -79,7 +79,8 @@ def prepare_data(data_folder, camera_loc, drop_static=True, reset_frac=0.1, floa
             data.loc[i, 'prompt'] = random.choice(plastic_cup_prompts)
         if 'strawberry' in data.loc[i, 'object']:
             data.loc[i, 'prompt'] = random.choice(strawberry_prompts)
-    # data['prompt'] = data['prompt'].apply(lambda x: x + f'<camera>{camera_loc}</camera>')
+    if camera_loc:
+        data['prompt'] = data['prompt'].apply(lambda x: x + f'<camera>{camera_loc}</camera>')
 
     # Round the floats
     pos = data.pose[i].split(',')

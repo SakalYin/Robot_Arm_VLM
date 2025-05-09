@@ -1,42 +1,90 @@
 import numpy as np
 from model.qwenvl.utils import extract_position_and_orientation
+import torch
 
-def euclidean_distance(predicted, truth):
-    distances = [abs(((float(p1[0]) - float(p2[0]))**2 + (float(p1[1]) - float(p2[1]))**2 + (float(p1[2]) - float(p2[2]))**2) ** 0.5)
-                    for p1,p2 in zip(predicted, truth)]
-    return  np.mean(distances)
+def euclidean_distance(predicted, truth, error_value=2.0):
+    distances = []
+    for p1, p2 in zip(predicted, truth):
+        # Skip if p1 or p2 is invalid
+        if p1 is None or p2 is None or len(p1) != 3 or len(p2) != 3:
+            distances.append(error_value)
+            continue
+        
+        d = ((float(p1[0]) - float(p2[0])) ** 2 + 
+             (float(p1[1]) - float(p2[1])) ** 2 + 
+             (float(p1[2]) - float(p2[2])) ** 2) ** 0.5
+        distances.append(d)
+    return np.mean(distances)
 
-def mae(predicted, truth):
-    ae = [abs(float(p1) - float(p2)) for p1,p2 in zip(predicted, truth)]
-    mae = np.mean(ae)
-    return mae
+def mae_xyz(predicted, truth, error_value=[0.95, 1.85, 0.5]):
+    errors_x = []
+    errors_y = []
+    errors_z = []
 
-def compute_metrics(eval_pred):
-    logits = eval_pred.predictions
-    labels = eval_pred.label_ids
-    print(logits.shape)
-    print(labels.shape)
-    # Convert logits to predicted token ids (argmax to get the predicted token)
-    predictions = logits.argmax(axis=-1)
-    predicted_texts = tokenizer.batch_decode(predictions, skip_special_tokens=True, padding_side='left')
-    labels_text = tokenizer.batch_decode(labels, skip_special_tokens=True, padding_side='left')
-    # extract values (fix to use batch)
-    predicted_param = [[pos,ori] for text in predicted_texts for pos, ori,obj in extract_position_and_orientation(text)]
-    label_param = [[pos,ori] for text in labels_texts for pos, ori,obj in extract_position_and_orientation(text)]
-    # transpose
-    predict_param = np.array([predicted_param]).T.astype(torch.bfloat16)
-    label_param = np.array([label_param]).T.astype(torch.bfloat16)
-    #euclidean
-    distances = euclidean_distance(predict_param[0], label_param[0])
+    for p1, p2 in zip(predicted, truth):
+        # Skip if p1 or p2 is invalid
+        if p1 is None or p2 is None or len(p1) != 3 or len(p2) != 3:
+            errors_x.append(error_value[0])
+            errors_y.append(error_value[1])
+            errors_z.append(error_value[2])
+            continue
+        
+        errors_x.append(abs(float(p1[0]) - float(p2[0])))
+        errors_y.append(abs(float(p1[1]) - float(p2[1])))
+        errors_z.append(abs(float(p1[2]) - float(p2[2])))
 
-    predicted_xyz, truth_xyz = np.array(predict_param).T, np.array(label_param).T
-    mae_x = mae(predicted_xyz[0], truth_xyz[0])
-    mae_y = mae(predicted_xyz[1], truth_xyz[1])
-    mae_z = mae(predicted_xyz[2], truth_xyz[2])
+    mae_x = np.mean(errors_x)
+    mae_y = np.mean(errors_y)
+    mae_z = np.mean(errors_z)
 
-    return {
-        'euclidean': distances,
-        'mea_x': mea_x,
-        'mea_y': mea_y,
-        'mea_z': mea_z
-        }
+    return mae_x, mae_y, mae_z
+
+class RobotArmMetric:
+    def __init__(self, tokenizer):
+        self.tokenizer = tokenizer
+
+    def compute(self, eval_preds):
+        tokenizer = self.tokenizer
+        preds = eval_preds.predictions
+        labels = eval_preds.label_ids
+        print(dir(eval_preds))
+        print(eval_preds.label_ids)
+        print(eval_preds.predictions)
+        print(eval_preds.inputs)
+        print(eval_preds.label_ids.shape)
+        print(eval_preds.predictions.shape)
+        print(eval_preds.inputs.shapes)
+
+        # Replace -100 in the preds as we can't decode them
+        preds = np.where(preds != -100, preds, tokenizer.pad_token_id)
+        decoded_preds = tokenizer.batch_decode(preds, skip_special_tokens=True, padding_side='left')
+
+        # Replace -100 in the labels as we can't decode them
+        labels = np.where(labels != -100, labels, tokenizer.pad_token_id)
+        decoded_labels = tokenizer.batch_decode(labels, skip_special_tokens=True, padding_side='left')
+
+        # print(decoded_preds)
+
+        # extract values (fix to use batch)
+        predicted_pos = [pos for text in decoded_preds for (pos,ori,obj) in [extract_position_and_orientation(text)]]
+        label_pos = [pos for text in decoded_labels for (pos,ori,obj) in [extract_position_and_orientation(text)]]
+        error_indices = [i for i, pos in enumerate(predicted_pos) if (pos is None) or (len(pos) < 3)]
+        corrected_pos_ratio = len(error_indices) / len(predicted_pos) if len(predicted_pos) > 0 else 0.0
+        print(predicted_pos)
+        print(label_pos)
+        predicted_ori = [ori for text in decoded_preds for (pos,ori,obj) in [extract_position_and_orientation(text)]]
+        label_ori = [ori for text in decoded_labels for (pos,ori,obj) in [extract_position_and_orientation(text)]]
+
+        # euclidean
+        distances = euclidean_distance(predicted_pos, label_pos, error_indices)
+        # print(predicted_pos, error_indices, distances)
+        # mae
+        mae_x, mae_y, mae_z = mae_xyz(predicted_pos, label_pos, error_value=[0.95, 1.85, 0.5])
+
+        return {
+            'euclidean': round(distances,4),
+            'mae_x': round(mae_x, 4),
+            'mae_y': round(mae_y, 4),
+            'mae_z': round(mae_z,4),
+            'corrected_pos_ratio': round(corrected_pos_ratio, 4)
+            }

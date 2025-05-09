@@ -5,14 +5,16 @@ from unsloth import FastVisionModel
 from transformers import TextStreamer
 import pandas as pd
 
-def resize_image(image_input):
+def resize_image(image_input, size=None):
     """Load image from path or matrices and resize them"""
+    size = size if size else (854,480)
     if isinstance(image_input, str):  
         image = Image.open(image_input)
     else:  
         image = image_input
 
-    image = image.resize((854, 480)).convert('RGB') 
+    size = size if size else (854,480)
+    image = image.resize(size).convert('RGB') 
     return image
 
 def extract_position_and_orientation(text, format=2):
@@ -44,11 +46,11 @@ def extract_position_and_orientation(text, format=2):
         else:
             return None, None, None
 
-def inference(image_path, prompt, model, tokenizer, system_message=None, temperature=1.5, min_p=0.1, format=2, return_value=True):
+def inference(image_path, prompt, model, tokenizer, size=None, system_message=None, temperature=1.5, min_p=0.1, format=2, return_value=True):
     """Performs inference and extracts position/orientation."""
     model = FastVisionModel.for_inference(model)  
 
-    image = resize_image(image_path)
+    image = resize_image(image_path, size=size)
     messages = [
         {
             "role": "system",
@@ -88,26 +90,35 @@ def inference(image_path, prompt, model, tokenizer, system_message=None, tempera
     if return_value:
         return position, orientation, object
 
-def batch_inference(image_paths, prompts, model, tokenizer, system_message=None, temperature=1.5, min_p=0.1, format=2, return_raw=False):
+def batch_inference(image_paths, prompts, model, tokenizer, size=None, system_message=None, temperature=1.5, min_p=0.1, format=2, return_raw=False):
     """Batch inference with multiple images and prompts"""
 
     model = FastVisionModel.for_inference(model)  # put model into inference mode
 
     # Step 1: Preprocess images
-    images = [resize_image(p) for p in image_paths]  # list of resized images
+    images = [resize_image(p, size=size) for p in image_paths]  # list of resized images
 
     # Step 2: Create messages (prompt list)
-    messages_list = [
+    if system_message is None:
+        messages_list = [
         [{
-            "role": "system",
-            "content": [{"type": "text", "text": system_message if system_message else "You are a helpful assistant."}],
-        },
-        {
             "role": "user", 
             "content": [{"type": "image"}, {"type": "text", "text": prompt}]
         }]
         for prompt in prompts
     ]
+    else:
+        messages_list = [
+            [{
+                "role": "system",
+                "content": [{"type": "text", "text": system_message if system_message else "You are a helpful assistant."}],
+            },
+            {
+                "role": "user", 
+                "content": [{"type": "image"}, {"type": "text", "text": prompt}]
+            }]
+            for prompt in prompts
+        ]
 
     # Step 3: Tokenize (this is where batching happens)
     input_texts = [tokenizer.apply_chat_template(msgs, add_generation_prompt=True) for msgs in messages_list]
@@ -123,7 +134,7 @@ def batch_inference(image_paths, prompts, model, tokenizer, system_message=None,
     # Step 4: Generate
     generated_tokens = model.generate(
         **inputs,
-        max_new_tokens=128,
+        max_new_tokens=100,
         use_cache=True,
         temperature=temperature,
         min_p=min_p
@@ -168,8 +179,18 @@ def verify_ouput(outputs):
             
             if len(position) != 3:
                 errors.append("Position format")
+            else:
+                try:
+                    position = [float(p) for p in position]
+                except:
+                    errors.append("Position float format")
             if len(orientation) != 4:
                 errors.append("Orientation format")
+            else:
+                try:
+                    orientation = [float(o) for o in orientation]
+                except:
+                    errors.append("Orientation float format")
         results.append([i, output, errors])
 
     return pd.DataFrame(results, columns=['index', 'raw', 'errors'])

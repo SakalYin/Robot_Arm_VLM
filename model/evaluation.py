@@ -160,11 +160,13 @@ def progress_bar(progress, bar_size=50):
     bar = f'|{progress}{space}|'
     return bar
     
-def dataset_inference(model, tokenizer, eval_dataset, system_message=None, batch_size=3, prompt_field='prompt', image_field='images', format=2, return_raw=False, temperature=1.5, min_p=0.1):
+def dataset_inference(model, tokenizer, eval_dataset, size=None, system_message=None, batch_size=3, prompt_field='prompt', image_field='images', format=2, return_raw=False, temperature=1.5, min_p=0.1):
     results = [[],[],[]]
     raws = []
     eval_dataset.reset_index(inplace=True, drop=True)
     print(f'Inferencing on dataset of {len(eval_dataset)} records with batch size of {batch_size} per iteration:')
+    size = size if size else (854,480)
+    print(f'All Images will be resized to {size}')
     # sys.stdout.write(f"\rProgress: {0:.2f}%        {progress_bar(0)}")
     # sys.stdout.flush() 
     for index in range(0, len(eval_dataset), batch_size):
@@ -175,10 +177,8 @@ def dataset_inference(model, tokenizer, eval_dataset, system_message=None, batch
             prompt = eval_dataset[prompt_field][index:index+batch_size]
             image = eval_dataset[image_field][index:index+batch_size]
         
-        if return_raw:
-            pos, ori, obj, raw = batch_inference(model=model, tokenizer=tokenizer, system_message=system_message, prompts=prompt, image_paths=image, format=format, return_raw=return_raw, temperature=temperature, min_p=min_p)
-        else:
-            pos, ori, obj = batch_inference(model=model, tokenizer=tokenizer, prompts=prompt, image_paths=image, format=format, return_raw=return_raw, temperature=temperature, min_p=min_p)
+        pos, ori, obj, raw = batch_inference(model=model, tokenizer=tokenizer, size=size, system_message=system_message, prompts=prompt, image_paths=image, format=format, return_raw=return_raw, temperature=temperature, min_p=min_p)
+
         results[0].extend(pos)
         results[1].extend(ori)
         results[2].extend(obj)
@@ -242,8 +242,8 @@ def get_error(df):
     idx = df[df["format_check"].apply(len) > 0].index
     return df, idx
 
-def eval_model(model, tokenizer, eval_dataset, system_message=None, batch_size=3, prompt_field='prompt', image_field='images', output_field='output', format=2, temperature=1.5, min_p=0.1):
-    results = dataset_inference(model=model, tokenizer=tokenizer, eval_dataset=eval_dataset, system_message=system_message, batch_size=batch_size, prompt_field=prompt_field, image_field=image_field, format=format, return_raw=True, temperature=temperature, min_p=min_p)
+def eval_model(model, tokenizer, eval_dataset, size=None, system_message=None, batch_size=3, prompt_field='prompt', image_field='images', output_field='output', format=2, temperature=1.5, min_p=0.1):
+    results = dataset_inference(model=model, tokenizer=tokenizer, eval_dataset=eval_dataset, size=size, system_message=system_message, batch_size=batch_size, prompt_field=prompt_field, image_field=image_field, format=format, return_raw=True, temperature=temperature, min_p=min_p)
   
     pos_truth = []
     ori_truth = []
