@@ -5,6 +5,26 @@ import sys
 from model.qwenvl.utils import batch_inference, extract_position_and_orientation
 import pandas as pd
 import re
+import evaluate
+
+def bleu_rouge(predicted, truth):
+    """
+    Calculate BLEU and ROUGE scores for the predicted and truth texts.
+    
+    Args:
+        predicted (list): List of predicted texts.
+        truth (list): List of ground truth texts.
+        
+    Returns:
+        tuple: BLEU and ROUGE scores.
+    """
+    bleu = evaluate.load("bleu")
+    rouge = evaluate.load("rouge")
+
+    bleu_score = bleu.compute(predictions=predicted, references=truth)
+    rouge_score = rouge.compute(predictions=predicted, references=truth)
+
+    return bleu_score['bleu'], rouge_score['rouge1']
 
 def euclidean_distance(predicted, truth):
     distances = [abs(((float(p1[0]) - float(p2[0]))**2 + (float(p1[1]) - float(p2[1]))**2 + (float(p1[2]) - float(p2[2]))**2) ** 0.5)
@@ -134,6 +154,17 @@ def position_evaluation_overview(predicted, truth):
     print(f"Mean Absolute Error | {mae_x:.4f}{space(mae_x)}| {mae_y:.4f}{space(mae_y)}| {mae_z:.4f}{space(mae_z)}|")
     print("---------------------------------------------------------------\n")
 
+def bleu_rouge_overview(predicted, truth):
+    bleu, rouge = bleu_rouge(predicted=predicted, truth=truth)
+    
+    print("\nCasualLM Evaluation:")
+    print("---------------------------------------------------------------")
+    print(f"BLEU Score          |                  {bleu:.4f}                 |")
+    print("---------------------------------------------------------------\n")
+    print(f"Rouge Score         |                  {rouge:.4f}                 |")
+    print("---------------------------------------------------------------\n")
+
+
 def orientation_evaluation_overview(predicted, truth):
     quat_error = mean_quaternion_error(predicted=predicted, truth=truth)
     roll, pitch, yaw = rpy_error(predicted=predicted, truth=truth)
@@ -163,6 +194,7 @@ def progress_bar(progress, bar_size=50):
 def dataset_inference(model, tokenizer, eval_dataset, size=None, system_message=None, batch_size=3, prompt_field='prompt', image_field='images', format=2, return_raw=False, temperature=1.5, min_p=0.1):
     results = [[],[],[]]
     raws = []
+    outs = []
     eval_dataset.reset_index(inplace=True, drop=True)
     print(f'Inferencing on dataset of {len(eval_dataset)} records with batch size of {batch_size} per iteration:')
     size = size if size else (854,480)
@@ -177,7 +209,7 @@ def dataset_inference(model, tokenizer, eval_dataset, size=None, system_message=
             prompt = eval_dataset[prompt_field][index:index+batch_size]
             image = eval_dataset[image_field][index:index+batch_size]
         
-        pos, ori, obj, raw = batch_inference(model=model, tokenizer=tokenizer, size=size, system_message=system_message, prompts=prompt, image_paths=image, format=format, return_raw=return_raw, temperature=temperature, min_p=min_p)
+        pos, ori, obj, out, raw = batch_inference(model=model, tokenizer=tokenizer, size=size, system_message=system_message, prompts=prompt, image_paths=image, format=format, return_raw=return_raw, temperature=temperature, min_p=min_p)
 
         results[0].extend(pos)
         results[1].extend(ori)
@@ -185,6 +217,7 @@ def dataset_inference(model, tokenizer, eval_dataset, size=None, system_message=
         
         if return_raw:
             raws.extend(raw)
+            outs.extend(out)
         
         prog = min(((index + batch_size)*100 / len(eval_dataset)), 100)
         sys.stdout.write(f"\rProgress: {prog:.2f}%        {progress_bar(prog)}")
@@ -196,6 +229,7 @@ def dataset_inference(model, tokenizer, eval_dataset, size=None, system_message=
     eval_dataset['obj_out'] = results[2]
     if return_raw:
         eval_dataset['raw_out'] = raws
+        eval_dataset['model_out'] = outs
 
     return eval_dataset
 
@@ -238,7 +272,7 @@ def validate_output_format(df, column_name):
 
 def get_error(df):
     df = df.copy()
-    df = validate_output_format(df, 'raw_out')
+    df = validate_output_format(df, 'model_out')
     idx = df[df["format_check"].apply(len) > 0].index
     return df, idx
 
@@ -263,6 +297,7 @@ def eval_model(model, tokenizer, eval_dataset, size=None, system_message=None, b
     eval_results = results.drop(index)
     print(f'[INFO] {len(index)} records are excluded from the evaluation due to inconsistent output format')
 
+    bleu_rouge_overview(predicted=eval_results['model_out'], truth=eval_results[output_field])
     position_evaluation_overview(predicted=eval_results['pos_out'], truth=eval_results['pos_truth'])
     orientation_evaluation_overview(predicted=eval_results['ori_out'], truth=eval_results['ori_truth'])
     class_evaluation(predicted=eval_results['obj_out'], truth=eval_results['obj_truth'])
