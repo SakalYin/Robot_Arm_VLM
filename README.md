@@ -154,13 +154,13 @@ Results from model trained with this repos config and dataset are as follow:
   </tr>
   <tr>
     <td>LlaVA-NeXT 7B</td>
-    <td>0.0480</td>
-    <td>0.0306</td>
-    <td>0.0296</td>
-    <td>0.0000</td>
-    <td>0.0000</td>
-    <td>0.0000</td>
-    <td>0.0000</td>
+    <td>-</td>
+    <td>-</td>
+    <td>-</td>
+    <td>-</td>
+    <td>-</td>
+    <td>-</td>
+    <td>-</td>
   </tr>
   <tr>
     <td>Llama Vision 11B</td>
