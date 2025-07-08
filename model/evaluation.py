@@ -6,6 +6,7 @@ from model.qwenvl.utils import batch_inference, extract_position_and_orientation
 import pandas as pd
 import re
 import evaluate
+import time
 
 def bleu_rouge(predicted, truth):
     """
@@ -191,10 +192,12 @@ def progress_bar(progress, bar_size=50):
     bar = f'|{progress}{space}|'
     return bar
     
-def dataset_inference(model, tokenizer, eval_dataset, size=None, system_message=None, batch_size=3, prompt_field='prompt', image_field='images', format=2, return_raw=False, temperature=1.5, min_p=0.1):
+def dataset_inference(model, tokenizer, eval_dataset, size=None, system_message=None, batch_size=3, prompt_field='prompt', image_field='images', format=2, return_raw=False, temperature=1.5, min_p=0.1, get_speed=False):
     results = [[],[],[]]
     raws = []
     outs = []
+    execution_times = []
+
     eval_dataset.reset_index(inplace=True, drop=True)
     print(f'Inferencing on dataset of {len(eval_dataset)} records with batch size of {batch_size} per iteration:')
     size = size if size else (854,480)
@@ -208,8 +211,14 @@ def dataset_inference(model, tokenizer, eval_dataset, size=None, system_message=
         else:
             prompt = eval_dataset[prompt_field][index:index+batch_size]
             image = eval_dataset[image_field][index:index+batch_size]
-        
+
+        start_time = time.perf_counter()
+
         pos, ori, obj, out, raw = batch_inference(model=model, tokenizer=tokenizer, size=size, system_message=system_message, prompts=prompt, image_paths=image, format=format, return_raw=return_raw, temperature=temperature, min_p=min_p)
+        
+        end_time = time.perf_counter()
+        execution_times.append(end_time - start_time)
+
 
         results[0].extend(pos)
         results[1].extend(ori)
@@ -231,7 +240,10 @@ def dataset_inference(model, tokenizer, eval_dataset, size=None, system_message=
         eval_dataset['raw_out'] = raws
         eval_dataset['model_out'] = outs
 
-    return eval_dataset
+    if get_speed:
+        return eval_dataset, execution_times
+    else:
+        return eval_dataset
 
 def validate_output_format(df, column_name):
     def check_parameter_counts(text):
@@ -276,8 +288,11 @@ def get_error(df):
     idx = df[df["format_check"].apply(len) > 0].index
     return df, idx
 
-def eval_model(model, tokenizer, eval_dataset, size=None, system_message=None, batch_size=3, prompt_field='prompt', image_field='images', output_field='output', format=2, temperature=1.5, min_p=0.1):
-    results = dataset_inference(model=model, tokenizer=tokenizer, eval_dataset=eval_dataset, size=size, system_message=system_message, batch_size=batch_size, prompt_field=prompt_field, image_field=image_field, format=format, return_raw=True, temperature=temperature, min_p=min_p)
+def eval_model(model, tokenizer, eval_dataset, size=None, system_message=None, batch_size=3, prompt_field='prompt', image_field='images', output_field='output', format=2, temperature=1.5, min_p=0.1, get_speed=False):
+    if get_speed:
+        results, execution_times = dataset_inference(model=model, tokenizer=tokenizer, eval_dataset=eval_dataset, size=size, system_message=system_message, batch_size=batch_size, prompt_field=prompt_field, image_field=image_field, format=format, return_raw=True, temperature=temperature, min_p=min_p, get_speed=get_speed)
+    else:
+        results = dataset_inference(model=model, tokenizer=tokenizer, eval_dataset=eval_dataset, size=size, system_message=system_message, batch_size=batch_size, prompt_field=prompt_field, image_field=image_field, format=format, return_raw=True, temperature=temperature, min_p=min_p, get_speed=get_speed)
   
     pos_truth = []
     ori_truth = []
@@ -302,4 +317,7 @@ def eval_model(model, tokenizer, eval_dataset, size=None, system_message=None, b
     orientation_evaluation_overview(predicted=eval_results['ori_out'], truth=eval_results['ori_truth'])
     class_evaluation(predicted=eval_results['obj_out'], truth=eval_results['obj_truth'])
     
-    return results, index
+    if get_speed:
+        return results, index, execution_times
+    else:
+        return results, index
